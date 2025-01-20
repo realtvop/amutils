@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="amutils",
-    version="0.0.2",
+    version="0.0.3",
     py_modules=["main", "bridge", "file_reader"],
     packages=find_packages(),
     install_requires=[
