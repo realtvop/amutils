@@ -43,6 +43,9 @@ def main():
     if command == "replace": process_folder(path, folder=os.path.isdir(path))
     elif command == "playedtime": get_played_time()
     elif command == "stat": get_stat()
+    else:
+        print(f"Error: Unknown command '{command}'. Use --help to see available commands.")
+        sys.exit(1)
 
 
 if __name__ == "__main__":
