@@ -5,7 +5,7 @@ def print_help():
 
 Usage:
 
-    amutils <command> [arguments]
+    amutils <command> [file]
 
 Commands:
 
@@ -16,10 +16,12 @@ Commands:
     sys.exit(0)
 
 def process_folder(folder_path, folder=True):
+    if not os.path.exists(folder_path):
+        print(f"Error: Folder or file does not exist")
+        return
     songs = file_reader.get_songs_in_folder(os.path.abspath(folder_path)) if folder else [ file_reader.process_file(os.path.abspath(folder_path)) ]
     for song in songs:
         track = bridge.get_song_info(song.meta.title, song.meta.artist, song.meta.album)
-        # print(f"Song info: {track}")
         bridge.replace_song(song, track)
 
 def get_played_time():
