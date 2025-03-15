@@ -6,3 +6,5 @@ tmp
 amutils.egg-info
 dist
 build
+*.csv
+*.txt

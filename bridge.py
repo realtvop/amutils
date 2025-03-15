@@ -104,15 +104,15 @@ def calculate_file_sha256(file_path):
 
 def get_all_tracks():
     """
-    Get all tracks from the Apple Music library with their id, name, album, artist, play count, favorite status, and duration.
+    Get all tracks from the Apple Music library with their id, name, album, artist, album artist, play count, favorite status, duration, and file path.
     
     Returns:
-        list: A list of track objects with id, name, album, artist, play_count, is_favorite, and duration attributes
+        list: A list of track objects with id, name, album, artist, album_artist, play_count, is_favorite, duration, and file_path attributes
     """
     from collections import namedtuple
     
     # Create a track object to store information
-    Track = namedtuple('Track', ['id', 'name', 'album', 'artist', 'play_count', 'is_favorite', 'duration'])
+    Track = namedtuple('Track', ['id', 'name', 'album', 'artist', 'album_artist', 'play_count', 'is_favorite', 'duration', 'file_path'])
     
     try:
         # Use appscript to query Apple Music library (consistent with other functions)
@@ -127,20 +127,35 @@ def get_all_tracks():
                 track_name = track.name()
                 album_name = track.album()
                 artist_name = track.artist()
+                
+                # Get album artist (might be different from the track artist)
+                try:
+                    album_artist_name = track.album_artist()
+                except:
+                    album_artist_name = artist_name  # Default to regular artist if album artist is not available
+                
                 play_count = track.played_count()
                 is_favorite = track.favorited()
                 
-                # Get track duration in seconds
-                duration = track.duration()
+                # Get track duration in seconds and round to one decimal place
+                duration = round(track.duration(), 1)
+                
+                # Get file path (if available)
+                try:
+                    file_path = track.location().path
+                except:
+                    file_path = ""
                 
                 result.append(Track(
                     id=str(track_id),
                     name=track_name,
                     album=album_name,
                     artist=artist_name,
+                    album_artist=album_artist_name,
                     play_count=play_count,
                     is_favorite=bool(is_favorite),
-                    duration=duration
+                    duration=duration,
+                    file_path=file_path
                 ))
             except Exception as e:
                 print(f"Error processing track: {e}")
@@ -193,4 +208,202 @@ def update_track_by_id(track_id, play_count=None, is_favorite=None, name=None, a
         return True
     except Exception as e:
         print(f"Error updating track {track_id}: {e}")
+        return False
+
+def get_track_by_file_path(file_path):
+    """
+    Find a track in the Apple Music library by its file path.
+    
+    Args:
+        file_path (str): The file path to search for
+        
+    Returns:
+        An appscript track object if found, None otherwise
+    """
+    try:
+        if not file_path:
+            return None
+            
+        # Get all tracks from the library
+        library = app.library_playlists[1]
+        tracks = library.tracks()
+        
+        # Get the filename for fallback matching
+        import os
+        import unicodedata
+        
+        # Normalize the input path for better matching
+        def normalize_path(path):
+            if not path:
+                return ""
+            # Convert to NFC form (preferred for macOS)
+            path = unicodedata.normalize('NFC', path)
+            # Strip trailing slashes
+            path = path.rstrip('/')
+            return path
+            
+        # Prepare the original path and variations for matching
+        normalized_path = normalize_path(file_path)
+        
+        # Get base filename for fallback matching (both with and without extension)
+        filename = os.path.basename(normalized_path)
+        filename_no_ext = os.path.splitext(filename)[0]
+        
+        # Prepare matching strategies
+        path_components = normalized_path.split('/')
+        # Get the last 3 components if available (most likely to be unique)
+        last_components = '/'.join(path_components[-3:]) if len(path_components) >= 3 else normalized_path
+        
+        # Additional fallbacks for movpkg directories
+        if normalized_path.endswith('.movpkg'):
+            # Also try without .movpkg
+            non_movpkg_path = normalized_path[:-7]
+            filename_non_movpkg = os.path.basename(non_movpkg_path)
+        else:
+            non_movpkg_path = None
+            filename_non_movpkg = None
+            
+        # Check each track to see if its location matches any of our paths
+        for track in tracks:
+            try:
+                # Try to get the track location
+                location = track.location()
+                if location is None:
+                    continue
+                    
+                track_path = str(location)
+                normalized_track_path = normalize_path(track_path)
+                
+                # Match strategy 1: Exact path match
+                if normalized_path == normalized_track_path:
+                    return track
+                    
+                # Match strategy 2: Path contains our path (for partial matches)
+                if normalized_path in normalized_track_path or normalized_track_path in normalized_path:
+                    return track
+                    
+                # Match strategy 3: Last components matching
+                if last_components in normalized_track_path:
+                    return track
+                    
+                # Match strategy 4: Filename matching
+                track_filename = os.path.basename(normalized_track_path)
+                if filename and (filename == track_filename):
+                    return track
+                    
+                # Match strategy 5: Filename without extension
+                track_filename_no_ext = os.path.splitext(track_filename)[0]
+                if filename_no_ext and (filename_no_ext == track_filename_no_ext):
+                    return track
+                    
+                # Match strategy 6: Check for .movpkg variations
+                if non_movpkg_path and (non_movpkg_path in normalized_track_path or 
+                   filename_non_movpkg == track_filename_no_ext):
+                    return track
+                    
+                # Match strategy 7: Check if the filename is a substring of track path
+                # This helps when special characters are causing comparison issues
+                if filename and filename in normalized_track_path:
+                    return track
+                    
+                # Match strategy 8: Handle numeric IDs in filenames (like 26791805)
+                if filename_no_ext.isdigit() and track_filename_no_ext.isdigit():
+                    if filename_no_ext == track_filename_no_ext:
+                        return track
+                    
+            except Exception:
+                # Skip tracks that have issues with location
+                continue
+                
+        # No match found
+        return None
+    except Exception as e:
+        print(f"Error finding track by file path: {e}")
+        return None
+
+def get_track_by_duration(duration, tolerance=0.1):
+    """
+    Find a track in the Apple Music library by its duration with precise matching.
+    
+    Args:
+        duration (float): The duration of the track in seconds
+        tolerance (float, optional): Allowed duration difference in seconds (default: 0.1)
+        
+    Returns:
+        An appscript track object if found, None otherwise
+    """
+    try:
+        if not duration:
+            return None
+            
+        # Get all tracks from the library
+        library = app.library_playlists[1]
+        tracks = library.tracks()
+        
+        # Find all tracks with matching duration within tolerance
+        matching_tracks = []
+        for track in tracks:
+            try:
+                track_duration = track.duration()
+                
+                # Check if duration is within tolerance
+                if abs(track_duration - float(duration)) <= tolerance:
+                    matching_tracks.append(track)
+            except Exception:
+                continue
+                
+        if matching_tracks:
+            # Return the closest duration match
+            return min(matching_tracks, key=lambda t: abs(t.duration() - float(duration)))
+            
+        # No match found
+        return None
+    except Exception as e:
+        print(f"Error finding track by duration: {e}")
+        return None
+
+def update_track_info(track, name=None, album=None, artist=None, album_artist=None, play_count=None, is_favorite=None):
+    """
+    Update various information for a track.
+    
+    Args:
+        track: The appscript track object to update
+        name (str, optional): New track name
+        album (str, optional): New album name
+        artist (str, optional): New artist name
+        album_artist (str, optional): New album artist
+        play_count (int, optional): New play count
+        is_favorite (bool, optional): New favorite status
+        
+    Returns:
+        bool: True if updated successfully, False otherwise
+    """
+    try:
+        # Update track name if provided
+        if name is not None and name.strip():
+            track.name.set(name)
+            
+        # Update album name if provided
+        if album is not None and album.strip():
+            track.album.set(album)
+            
+        # Update artist name if provided
+        if artist is not None and artist.strip():
+            track.artist.set(artist)
+            
+        # Update album artist if provided
+        if album_artist is not None and album_artist.strip():
+            track.album_artist.set(album_artist)
+            
+        # Update play count if provided
+        if play_count is not None:
+            track.played_count.set(play_count)
+            
+        # Update favorite status if provided
+        if is_favorite is not None:
+            track.favorited.set(is_favorite)
+            
+        return True
+    except Exception as e:
+        print(f"Error updating track information: {e}")
         return False
