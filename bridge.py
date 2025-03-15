@@ -594,3 +594,73 @@ def get_track_by_title_artist_combo(title, artist=None, album=None):
     except Exception as e:
         print(f"Error finding track by title/artist: {e}")
         return None
+
+def add_files_to_playlist(file_paths, playlist_name):
+    """
+    Add files to a specified Apple Music playlist.
+    
+    Args:
+        file_paths: List of paths to .movpkg files to add
+        playlist_name: Name of the playlist to add files to
+    
+    Returns:
+        Number of files successfully added
+    """
+    import appscript
+    
+    itunes = appscript.app('Music')
+    
+    # Try to find the playlist, create it if it doesn't exist
+    try:
+        playlist = itunes.playlists[playlist_name].get()
+    except:
+        playlist = itunes.make(new=appscript.k.playlist, with_properties={'name': playlist_name})
+    
+    added_count = 0
+    
+    for file_path in file_paths:
+        try:
+            # Add the file to iTunes library and the playlist
+            track = itunes.add(file_path, to=playlist)
+            added_count += 1
+        except Exception as e:
+            print(f"Failed to add {file_path}: {str(e)}")
+    
+    return added_count
+
+def add_tracks_to_playlist(tracks, playlist_name):
+    """
+    Add existing library tracks to a specified Apple Music playlist.
+    
+    Args:
+        tracks: List of track objects from get_all_tracks()
+        playlist_name: Name of the playlist to add tracks to
+    
+    Returns:
+        Number of tracks successfully added
+    """
+    try:
+        # Try to find the playlist, create it if it doesn't exist
+        try:
+            playlist = app.playlists[playlist_name].get()
+        except:
+            playlist = app.make(new=app.k.playlist, with_properties={'name': playlist_name})
+        
+        added_count = 0
+        
+        for track in tracks:
+            try:
+                # Find the actual track object using the ID
+                library_track = app.library_playlists[1].tracks[its.id == int(track.id)].first()
+                
+                # Duplicate the track to the playlist
+                library_track.duplicate(to=playlist)
+                added_count += 1
+                print(f"Added '{track.name}' by {track.artist} to playlist '{playlist_name}'")
+            except Exception as e:
+                print(f"Failed to add track '{track.name}': {str(e)}")
+        
+        return added_count
+    except Exception as e:
+        print(f"Error creating or accessing playlist: {str(e)}")
+        return 0
