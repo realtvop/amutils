@@ -76,3 +76,48 @@ def format_time_in_days(seconds):
 
 def get_formatted_total_playtime():
     return format_time_in_days(get_total_playtime()[0])
+
+def get_all_tracks():
+    """
+    Get all tracks from the Apple Music library with their id, name, play count, and favorite status.
+    
+    Returns:
+        list: A list of track objects with id, name, album, artist, play_count, and is_favorite attributes
+    """
+    from collections import namedtuple
+    
+    # Create a track object to store information
+    Track = namedtuple('Track', ['id', 'name', 'album', 'artist', 'play_count', 'is_favorite'])
+    
+    try:
+        # Use appscript to query Apple Music library (consistent with other functions)
+        library = app.library_playlists[1]
+        tracks = library.tracks()
+        
+        result = []
+        for track in tracks:
+            try:
+                # Get track information
+                track_id = track.id()
+                track_name = track.name()
+                album_name = track.album()
+                artist_name = track.artist()
+                play_count = track.played_count()
+                is_favorite = track.favorited()
+                
+                result.append(Track(
+                    id=str(track_id),
+                    name=track_name,
+                    album=album_name,
+                    artist=artist_name,
+                    play_count=play_count,
+                    is_favorite=bool(is_favorite)
+                ))
+            except Exception as e:
+                print(f"Error processing track: {e}")
+                continue
+                
+        return result
+    except Exception as e:
+        print(f"Failed to get tracks: {e}")
+        return []

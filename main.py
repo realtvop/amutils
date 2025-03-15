@@ -1,4 +1,5 @@
 import sys, os, bridge, file_reader, math
+import exporter
 
 def print_help():
     print('''amutils - Apple Music Utilities
@@ -12,6 +13,7 @@ Commands:
     stat           get your statistics
     playedtime     get library total played time
     replace        use the given music file(s) to replace the song with the same metadata
+    export         export track list to CSV file with id, name, play count, and favorite status
 ''')
     sys.exit(0)
 
@@ -43,10 +45,10 @@ def main():
     if command == "replace": process_folder(path, folder=os.path.isdir(path))
     elif command == "playedtime": get_played_time()
     elif command == "stat": get_stat()
+    elif command == "export": exporter.handle_export_command(path)
     else:
         print(f"Error: Unknown command '{command}'. Use --help to see available commands.")
         sys.exit(1)
-
 
 if __name__ == "__main__":
     main()
