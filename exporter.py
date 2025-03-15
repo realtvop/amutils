@@ -75,7 +75,6 @@ def import_tracks_from_csv(input_path):
         updated_count = 0
         failed_count = 0
         skipped_count = 0
-        duration_matched_count = 0
         
         # Try multiple encodings in case of issues
         encodings = ['utf-8-sig', 'utf-8', 'latin-1', 'gb18030', 'shift_jis']
@@ -88,7 +87,6 @@ def import_tracks_from_csv(input_path):
                     # Check if this is a standard format or matched tracks format
                     is_standard_format = 'id' in reader.fieldnames
                     is_matched_format = 'File Directory' in reader.fieldnames
-                    has_duration = 'Duration(s)' in reader.fieldnames
                     
                     if not (is_standard_format or is_matched_format):
                         print(f"Error: CSV file must contain either 'id' or 'File Directory' column")
@@ -132,10 +130,9 @@ def import_tracks_from_csv(input_path):
                             album = row.get('Album')
                             artist = row.get('Artist')
                             album_artist = row.get('Album Artist')
-                            duration = row.get('Duration(s)')
                             
                             if file_path:
-                                # Try to find track by file path
+                                # Try to find track by file path only (no title matching fallback)
                                 track = bridge.get_track_by_file_path(file_path)
                                 
                                 if track:
@@ -145,44 +142,9 @@ def import_tracks_from_csv(input_path):
                                     else:
                                         failed_count += 1
                                 else:
-                                    # Second attempt: try with just the filename if full path failed
-                                    filename = os.path.basename(file_path.rstrip('/'))
-                                    if filename:
-                                        track = bridge.get_track_by_file_path(filename)
-                                        
-                                        if track:
-                                            # Update the track with matched information
-                                            if bridge.update_track_info(track, title, album, artist, album_artist):
-                                                updated_count += 1
-                                                print(f"Successfully matched by filename: {filename}")
-                                            else:
-                                                failed_count += 1
-                                        # Third attempt: try with duration matching if duration is provided
-                                        elif has_duration and duration and title:
-                                            try:
-                                                duration_float = float(duration)
-                                                # 移除了标题和艺术家参数，仅使用持续时间匹配
-                                                track = bridge.get_track_by_duration(duration_float)
-                                                
-                                                if track:
-                                                    # Update the track with matched information
-                                                    if bridge.update_track_info(track, title, album, artist, album_artist):
-                                                        duration_matched_count += 1
-                                                        print(f"Successfully matched by duration: {title} ({duration}s)")
-                                                    else:
-                                                        failed_count += 1
-                                                else:
-                                                    print(f"Could not find track with path or duration: {file_path} ({duration}s)")
-                                                    failed_count += 1
-                                            except (ValueError, TypeError):
-                                                print(f"Invalid duration value: {duration}")
-                                                failed_count += 1
-                                        else:
-                                            print(f"Could not find track with path: {file_path}")
-                                            failed_count += 1
-                                    else:
-                                        print(f"Could not find track with path: {file_path}")
-                                        failed_count += 1
+                                    # Just report failure - no fallback to title matching
+                                    print(f"Could not find track with path: {file_path}")
+                                    failed_count += 1
                             else:
                                 skipped_count += 1
                 
@@ -193,7 +155,7 @@ def import_tracks_from_csv(input_path):
                     return False
                 continue
         
-        print(f"Import complete: {updated_count} tracks updated by path, {duration_matched_count} matched by duration, {failed_count} failed, {skipped_count} skipped")
+        print(f"Import complete: {updated_count} tracks updated, {failed_count} failed, {skipped_count} skipped")
         return True
     except Exception as e:
         print(f"Error importing CSV: {e}")
@@ -221,9 +183,26 @@ def handle_import_command(path):
     if os.path.isdir(path):
         print("Error: Please specify a CSV file, not a directory")
         return
-        
-    if not path.endswith('.csv'):
-        print("Error: File must have .csv extension")
-        return
-        
-    import_tracks_from_csv(path)
+    
+    # 支持任意扩展名的文件，只要文件存在
+    if os.path.exists(path):
+        print(f"Using file: {path}")
+        print("---------------------------------------")
+        print("进阶文件路径匹配已启用，将进行多层次匹配")
+        print("---------------------------------------")
+        import_tracks_from_csv(path)
+    else:
+        # 尝试添加.csv扩展名再检查
+        csv_path = path + '.csv'
+        if os.path.exists(csv_path):
+            print(f"Using file with added .csv extension: {csv_path}")
+            import_tracks_from_csv(csv_path)
+        else:
+            # 尝试其他可能的文件扩展名
+            sv_path = path + '.sv'
+            if os.path.exists(sv_path):
+                print(f"Using file with .sv extension: {sv_path}")
+                import_tracks_from_csv(sv_path)
+            else:
+                print(f"Error: File does not exist: {path}")
+                print("Please check the file path and try again.")

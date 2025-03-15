@@ -231,92 +231,185 @@ def get_track_by_file_path(file_path):
         # Get the filename for fallback matching
         import os
         import unicodedata
+        import re
         
-        # Normalize the input path for better matching
-        def normalize_path(path):
+        # Print out all bytes in file_path to debug hidden characters
+        print(f"Debug original path: {file_path}")
+        hex_bytes = ' '.join([f'{ord(c):x}' for c in file_path])
+        print(f"Path bytes (hex): {hex_bytes[:50]}... (truncated)")
+        
+        # Create clean normalized version of the path
+        def deep_clean_path(path):
             if not path:
                 return ""
-            # Convert to NFC form (preferred for macOS)
+            # Remove any control characters and zero-width spaces
+            path = re.sub(r'[\u200B-\u200F\u2028-\u202F\uFEFF]', '', path)
+            # Normalize unicode form
             path = unicodedata.normalize('NFC', path)
-            # Strip trailing slashes
-            path = path.rstrip('/')
+            # Strip all trailing whitespace, slashes and numbers before extension
+            path = re.sub(r'\s+\d+(\.\w+)$', r'\1', path)
+            path = path.rstrip('/ ')
             return path
             
-        # Prepare the original path and variations for matching
-        normalized_path = normalize_path(file_path)
-        
-        # Get base filename for fallback matching (both with and without extension)
-        filename = os.path.basename(normalized_path)
-        filename_no_ext = os.path.splitext(filename)[0]
-        
-        # Prepare matching strategies
-        path_components = normalized_path.split('/')
-        # Get the last 3 components if available (most likely to be unique)
-        last_components = '/'.join(path_components[-3:]) if len(path_components) >= 3 else normalized_path
-        
-        # Additional fallbacks for movpkg directories
-        if normalized_path.endswith('.movpkg'):
-            # Also try without .movpkg
-            non_movpkg_path = normalized_path[:-7]
-            filename_non_movpkg = os.path.basename(non_movpkg_path)
-        else:
-            non_movpkg_path = None
-            filename_non_movpkg = None
+        # Create search keys from a path
+        def get_path_keys(path):
+            """Extract various identifying keys from a path for fuzzy matching"""
+            if not path:
+                return {}
+                
+            # Basic path normalization
+            clean_path = deep_clean_path(path)
             
-        # Check each track to see if its location matches any of our paths
+            # Get filename components
+            filename = os.path.basename(clean_path)
+            dirname = os.path.dirname(clean_path)
+            
+            # Handle .movpkg special case
+            is_movpkg = clean_path.endswith('.movpkg')
+            if is_movpkg:
+                basename = filename[:-7]  # Remove .movpkg
+            else:
+                basename = os.path.splitext(filename)[0]
+                
+            # Clean the basename further (remove special chars and numbers)
+            simple_basename = re.sub(r'[^\w\s]', '', basename)
+            simple_basename = re.sub(r'\s+\d+$', '', simple_basename).strip().lower()
+            
+            # Get path segments for partial matching
+            path_parts = clean_path.split('/')
+            # Last 1-3 path segments are most useful for matching
+            segments = [p for p in path_parts[-3:] if p]
+            
+            # For Japanese/special char filenames, create an ASCII-only version
+            ascii_name = ''.join(c for c in simple_basename if ord(c) < 128)
+            
+            return {
+                'clean_path': clean_path,
+                'filename': filename,
+                'basename': basename,
+                'simple_basename': simple_basename,
+                'dirname': dirname,
+                'is_movpkg': is_movpkg,
+                'segments': segments,
+                'ascii_name': ascii_name
+            }
+        
+        # Get search keys from our target path
+        target_keys = get_path_keys(file_path)
+        print(f"Matching basename: '{target_keys['basename']}'")
+        
+        # Special log helper
+        def log_match(quality, track, reason):
+            try:
+                track_name = track.name()
+                artist_name = track.artist()
+                track_path = str(track.location())
+                filename = os.path.basename(track_path)
+                print(f"Match ({quality}): '{track_name}' by '{artist_name}' - {reason}")
+                print(f"Path: {filename}")
+            except:
+                print(f"Match ({quality}): [details unavailable] - {reason}")
+        
+        # First try direct lookup for better performance
+        if target_keys['is_movpkg']:
+            try:
+                # Try to find directly by name if it's a .movpkg (usually more reliable than path)
+                dir_name = os.path.basename(os.path.dirname(file_path))
+                name_to_search = target_keys['basename']
+                
+                # Clean up the name for better matching
+                name_to_search = re.sub(r'\s+\d+$', '', name_to_search)
+                name_to_search = re.sub(r'(?: \(feat\..+?\)|­+)$', '', name_to_search)
+                
+                print(f"Trying direct lookup by name: '{name_to_search}'")
+                exact_match_tracks = library.tracks[its.name == name_to_search]
+                if exact_match_tracks.count() > 0:
+                    track = exact_match_tracks.first()
+                    log_match('DIRECT', track, "exact name match")
+                    return track
+            except Exception as e:
+                print(f"Direct lookup error: {e}")
+        
+        # Collect matches with their quality scores
+        matches = []
+        
+        # Try each track with various matching strategies
         for track in tracks:
             try:
-                # Try to get the track location
+                # Skip tracks without location
                 location = track.location()
                 if location is None:
                     continue
-                    
-                track_path = str(location)
-                normalized_track_path = normalize_path(track_path)
                 
-                # Match strategy 1: Exact path match
-                if normalized_path == normalized_track_path:
-                    return track
+                # Get the track's path and extract search keys
+                track_path = str(location)
+                track_keys = get_path_keys(track_path)
+                
+                # Direct match - highest priority 
+                if target_keys['clean_path'] == track_keys['clean_path']:
+                    matches.append((100, track, "exact path match"))
+                    continue
+                
+                # Exact filename match (very reliable)
+                if target_keys['filename'] == track_keys['filename']:
+                    matches.append((90, track, "exact filename match"))
+                    continue
+                
+                # Base filename match (without extension or numbers)
+                if target_keys['basename'] == track_keys['basename']:
+                    matches.append((80, track, "basename match"))
+                    continue
+                
+                # Simple basename match (ignoring special chars and numbers)
+                if target_keys['simple_basename'] and target_keys['simple_basename'] == track_keys['simple_basename']:
+                    matches.append((70, track, "simple basename match"))
+                    continue
                     
-                # Match strategy 2: Path contains our path (for partial matches)
-                if normalized_path in normalized_track_path or normalized_track_path in normalized_path:
-                    return track
+                # For .movpkg files specifically
+                if target_keys['is_movpkg'] and track_keys['is_movpkg']:
+                    # Special case: try without version numbers at the end (e.g. "song 2.movpkg")
+                    if re.sub(r'\s+\d+$', '', target_keys['basename']) == re.sub(r'\s+\d+$', '', track_keys['basename']):
+                        matches.append((65, track, ".movpkg basename match without numbers"))
+                        continue
+                
+                # Check if track filename contains our target basename
+                if target_keys['basename'] in track_keys['filename']:
+                    matches.append((60, track, "filename contains target basename"))
+                    continue
                     
-                # Match strategy 3: Last components matching
-                if last_components in normalized_track_path:
-                    return track
+                # Last segments matching (useful for nested paths)
+                common_segments = set(target_keys['segments']).intersection(set(track_keys['segments']))
+                if len(common_segments) >= 2:
+                    matches.append((50, track, f"{len(common_segments)} common path segments"))
+                    continue
+                
+                # Parent directory matches + similar filename 
+                if (os.path.basename(target_keys['dirname']) == os.path.basename(track_keys['dirname']) and
+                    len(target_keys['simple_basename']) > 3 and 
+                    target_keys['simple_basename'] in track_keys['simple_basename']):
+                    matches.append((40, track, "same directory, similar filename"))
+                    continue
+                
+                # For ASCII-only simplified matching (when nothing else works)
+                if (len(target_keys['ascii_name']) > 3 and target_keys['ascii_name'] == track_keys['ascii_name']):
+                    matches.append((30, track, "ASCII-only name match"))
+                    continue
                     
-                # Match strategy 4: Filename matching
-                track_filename = os.path.basename(normalized_track_path)
-                if filename and (filename == track_filename):
-                    return track
-                    
-                # Match strategy 5: Filename without extension
-                track_filename_no_ext = os.path.splitext(track_filename)[0]
-                if filename_no_ext and (filename_no_ext == track_filename_no_ext):
-                    return track
-                    
-                # Match strategy 6: Check for .movpkg variations
-                if non_movpkg_path and (non_movpkg_path in normalized_track_path or 
-                   filename_non_movpkg == track_filename_no_ext):
-                    return track
-                    
-                # Match strategy 7: Check if the filename is a substring of track path
-                # This helps when special characters are causing comparison issues
-                if filename and filename in normalized_track_path:
-                    return track
-                    
-                # Match strategy 8: Handle numeric IDs in filenames (like 26791805)
-                if filename_no_ext.isdigit() and track_filename_no_ext.isdigit():
-                    if filename_no_ext == track_filename_no_ext:
-                        return track
-                    
-            except Exception:
-                # Skip tracks that have issues with location
+            except Exception as e:
+                # Skip tracks with errors
                 continue
                 
-        # No match found
+        # Sort by match quality and return best match
+        if matches:
+            matches.sort(key=lambda x: x[0], reverse=True)
+            best_match = matches[0][1]
+            log_match(matches[0][0], best_match, matches[0][2])
+            return best_match
+            
+        # If we get here, we've tried everything and found nothing
+        print(f"No matching track found in library for: {file_path}")
         return None
+        
     except Exception as e:
         print(f"Error finding track by file path: {e}")
         return None
@@ -336,6 +429,8 @@ def get_track_by_duration(duration, tolerance=0.1):
         if not duration:
             return None
             
+        print(f"Searching for track with duration: {duration}s (tolerance: {tolerance}s)")
+        
         # Get all tracks from the library
         library = app.library_playlists[1]
         tracks = library.tracks()
@@ -348,15 +443,26 @@ def get_track_by_duration(duration, tolerance=0.1):
                 
                 # Check if duration is within tolerance
                 if abs(track_duration - float(duration)) <= tolerance:
-                    matching_tracks.append(track)
+                    matching_tracks.append((track, abs(track_duration - float(duration))))
             except Exception:
                 continue
                 
         if matching_tracks:
+            # Sort by duration difference
+            matching_tracks.sort(key=lambda x: x[1])
+            
+            # Print some debug info for top matches
+            for i, (track, diff) in enumerate(matching_tracks[:3]):
+                try:
+                    print(f"Match {i+1}: '{track.name()}' by '{track.artist()}' - {track.duration()}s (diff: {diff:.3f}s)")
+                except:
+                    print(f"Match {i+1}: [track name unavailable] - {track.duration()}s (diff: {diff:.3f}s)")
+            
             # Return the closest duration match
-            return min(matching_tracks, key=lambda t: abs(t.duration() - float(duration)))
+            return matching_tracks[0][0]
             
         # No match found
+        print(f"No tracks found with duration close to {duration}s (tolerance: {tolerance}s)")
         return None
     except Exception as e:
         print(f"Error finding track by duration: {e}")
@@ -407,3 +513,84 @@ def update_track_info(track, name=None, album=None, artist=None, album_artist=No
     except Exception as e:
         print(f"Error updating track information: {e}")
         return False
+
+def get_track_by_title_and_artist(title, artist=None):
+    """
+    Find a track in the Apple Music library by its title and artist.
+    
+    Args:
+        title (str): The title of the track
+        artist (str, optional): The artist name
+        
+    Returns:
+        An appscript track object if found, None otherwise
+    """
+    try:
+        if not title:
+            return None
+            
+        # Create search condition
+        condition = its.name.contains(title)
+        if artist:
+            condition = condition.AND(its.artist.contains(artist))
+            
+        # Find track
+        library = app.library_playlists[1]
+        tracks = library.tracks[condition]
+        
+        # Return first match if any
+        if tracks.count():
+            return tracks.first()
+        return None
+        
+    except Exception as e:
+        print(f"Error finding track by title/artist: {e}")
+        return None
+
+def get_track_by_title_artist_combo(title, artist=None, album=None):
+    """
+    Find a track by its title and artist combination. More flexible than the path matching.
+    
+    Args:
+        title (str): The title of the track 
+        artist (str, optional): The artist name
+        album (str, optional): The album name
+        
+    Returns:
+        An appscript track object if found, None otherwise
+    """
+    try:
+        if not title:
+            return None
+        
+        print(f"Searching for track: '{title}' by '{artist or 'any artist'}'")
+        
+        # Get library tracks
+        library = app.library_playlists[1]
+        
+        # First try exact match
+        if artist and album:
+            tracks = library.tracks[its.name == title and its.artist == artist and its.album == album]
+            if tracks.count() > 0:
+                return tracks.first()
+        
+        if artist:
+            tracks = library.tracks[its.name == title and its.artist == artist]
+            if tracks.count() > 0:
+                return tracks.first()
+        
+        # Then try contains match
+        if artist:
+            tracks = library.tracks[its.name.contains(title) and its.artist.contains(artist)]
+            if tracks.count() > 0:
+                return tracks.first()
+        
+        # Last resort, just title match
+        tracks = library.tracks[its.name.contains(title)]
+        if tracks.count() > 0:
+            return tracks.first()
+        
+        return None
+    except Exception as e:
+        print(f"Error finding track by title/artist: {e}")
+        return None
