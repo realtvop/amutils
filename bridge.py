@@ -1,5 +1,6 @@
 from appscript import app as attach, its
 from types import SimpleNamespace
+import hashlib
 
 app = attach('Music')
 
@@ -77,17 +78,41 @@ def format_time_in_days(seconds):
 def get_formatted_total_playtime():
     return format_time_in_days(get_total_playtime()[0])
 
+def calculate_file_sha256(file_path):
+    """
+    Calculate SHA256 hash of a file.
+    
+    Args:
+        file_path (str): Path to the file
+        
+    Returns:
+        str: SHA256 hash as hexadecimal string, or empty string if error
+    """
+    try:
+        if not file_path:
+            return ""
+            
+        sha256_hash = hashlib.sha256()
+        with open(file_path, "rb") as f:
+            # Read and update hash in chunks to efficiently handle large files
+            for byte_block in iter(lambda: f.read(4096), b""):
+                sha256_hash.update(byte_block)
+        return sha256_hash.hexdigest()
+    except Exception as e:
+        print(f"Error calculating hash for {file_path}: {e}")
+        return ""
+
 def get_all_tracks():
     """
-    Get all tracks from the Apple Music library with their id, name, play count, and favorite status.
+    Get all tracks from the Apple Music library with their id, name, album, artist, play count, favorite status, and file hash.
     
     Returns:
-        list: A list of track objects with id, name, album, artist, play_count, and is_favorite attributes
+        list: A list of track objects with id, name, album, artist, play_count, is_favorite, and sha256 attributes
     """
     from collections import namedtuple
     
     # Create a track object to store information
-    Track = namedtuple('Track', ['id', 'name', 'album', 'artist', 'play_count', 'is_favorite'])
+    Track = namedtuple('Track', ['id', 'name', 'album', 'artist', 'play_count', 'is_favorite', 'sha256'])
     
     try:
         # Use appscript to query Apple Music library (consistent with other functions)
@@ -105,13 +130,25 @@ def get_all_tracks():
                 play_count = track.played_count()
                 is_favorite = track.favorited()
                 
+                # Get file path and calculate hash
+                location = None
+                file_hash = ""
+                try:
+                    location = track.location().path
+                    if location:
+                        file_hash = calculate_file_sha256(location)
+                except:
+                    # Some tracks might not have a local file
+                    pass
+                
                 result.append(Track(
                     id=str(track_id),
                     name=track_name,
                     album=album_name,
                     artist=artist_name,
                     play_count=play_count,
-                    is_favorite=bool(is_favorite)
+                    is_favorite=bool(is_favorite),
+                    sha256=file_hash
                 ))
             except Exception as e:
                 print(f"Error processing track: {e}")
@@ -121,3 +158,47 @@ def get_all_tracks():
     except Exception as e:
         print(f"Failed to get tracks: {e}")
         return []
+
+def update_track_by_id(track_id, play_count=None, is_favorite=None, name=None, album=None, artist=None):
+    """
+    Update track information based on track ID.
+    
+    Args:
+        track_id (str): ID of the track to update
+        play_count (int, optional): New play count value
+        is_favorite (bool, optional): New favorite status
+        name (str, optional): New track name
+        album (str, optional): New album name
+        artist (str, optional): New artist name
+        
+    Returns:
+        bool: True if track was found and updated, False otherwise
+    """
+    try:
+        # Find the track by ID
+        track = app.library_playlists[1].tracks[its.id == int(track_id)].first()
+        
+        # Update play count if provided
+        if play_count is not None:
+            track.played_count.set(play_count)
+            
+        # Update favorite status if provided
+        if is_favorite is not None:
+            track.favorited.set(is_favorite)
+            
+        # Update track name if provided
+        if name is not None and name.strip():
+            track.name.set(name)
+            
+        # Update album name if provided
+        if album is not None and album.strip():
+            track.album.set(album)
+            
+        # Update artist name if provided
+        if artist is not None and artist.strip():
+            track.artist.set(artist)
+            
+        return True
+    except Exception as e:
+        print(f"Error updating track {track_id}: {e}")
+        return False

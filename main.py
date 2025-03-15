@@ -13,7 +13,8 @@ Commands:
     stat           get your statistics
     playedtime     get library total played time
     replace        use the given music file(s) to replace the song with the same metadata
-    export         export track list to CSV file with id, name, play count, and favorite status
+    export         export track list to CSV file with id, name, album, artist, play count, and favorite status
+    import         import track information from CSV file, matching by track ID
 ''')
     sys.exit(0)
 
@@ -46,6 +47,7 @@ def main():
     elif command == "playedtime": get_played_time()
     elif command == "stat": get_stat()
     elif command == "export": exporter.handle_export_command(path)
+    elif command == "import": exporter.handle_import_command(path)
     else:
         print(f"Error: Unknown command '{command}'. Use --help to see available commands.")
         sys.exit(1)
