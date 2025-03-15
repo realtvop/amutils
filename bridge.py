@@ -104,15 +104,15 @@ def calculate_file_sha256(file_path):
 
 def get_all_tracks():
     """
-    Get all tracks from the Apple Music library with their id, name, album, artist, play count, favorite status, and file hash.
+    Get all tracks from the Apple Music library with their id, name, album, artist, play count, favorite status, and duration.
     
     Returns:
-        list: A list of track objects with id, name, album, artist, play_count, is_favorite, and sha256 attributes
+        list: A list of track objects with id, name, album, artist, play_count, is_favorite, and duration attributes
     """
     from collections import namedtuple
     
     # Create a track object to store information
-    Track = namedtuple('Track', ['id', 'name', 'album', 'artist', 'play_count', 'is_favorite', 'sha256'])
+    Track = namedtuple('Track', ['id', 'name', 'album', 'artist', 'play_count', 'is_favorite', 'duration'])
     
     try:
         # Use appscript to query Apple Music library (consistent with other functions)
@@ -130,16 +130,8 @@ def get_all_tracks():
                 play_count = track.played_count()
                 is_favorite = track.favorited()
                 
-                # Get file path and calculate hash
-                location = None
-                file_hash = ""
-                try:
-                    location = track.location().path
-                    if location:
-                        file_hash = calculate_file_sha256(location)
-                except:
-                    # Some tracks might not have a local file
-                    pass
+                # Get track duration in seconds
+                duration = track.duration()
                 
                 result.append(Track(
                     id=str(track_id),
@@ -148,7 +140,7 @@ def get_all_tracks():
                     artist=artist_name,
                     play_count=play_count,
                     is_favorite=bool(is_favorite),
-                    sha256=file_hash
+                    duration=duration
                 ))
             except Exception as e:
                 print(f"Error processing track: {e}")

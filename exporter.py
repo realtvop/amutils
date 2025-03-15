@@ -4,7 +4,7 @@ import bridge
 
 def export_tracks_to_csv(output_path):
     """
-    Export track list to CSV file with id, name, album, artist, play count, favorite status, and SHA256 hash.
+    Export track list to CSV file with id, name, album, artist, play count, favorite status, and duration.
     
     Args:
         output_path (str): Path to save the CSV file
@@ -22,7 +22,7 @@ def export_tracks_to_csv(output_path):
         try:
             # Use 'utf-8-sig' encoding which includes BOM for Excel compatibility
             with open(output_path, 'w', newline='', encoding='utf-8-sig') as csvfile:
-                fieldnames = ['id', 'name', 'album', 'artist', 'play_count', 'is_favorite', 'sha256']
+                fieldnames = ['id', 'name', 'album', 'artist', 'play_count', 'is_favorite', 'duration']
                 writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
                 
                 writer.writeheader()
@@ -34,7 +34,7 @@ def export_tracks_to_csv(output_path):
                         'artist': track.artist,
                         'play_count': track.play_count,
                         'is_favorite': track.is_favorite,
-                        'sha256': track.sha256
+                        'duration': track.duration
                     })
                     
             print(f"Successfully exported {len(tracks)} tracks to {output_path}")
